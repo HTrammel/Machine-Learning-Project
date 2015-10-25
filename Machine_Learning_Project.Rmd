@@ -1,0 +1,127 @@
+---
+title: "Machine Learning Project"
+author: "Harold Trammel"
+date: "October 10, 2015"
+output: html_document
+---
+```{r global_options, include=TRUE, echo=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=7, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+options(scipen=1, digits=2)
+```
+
+```{r load_libraries}
+library(dplyr)
+library(caret)
+library(randomForest)
+
+# function to remove columns that are primarily null or NA
+# remove columns that seem to not impact measures
+wle_cleaner <- function(wle_df) {
+    clean_df <- wle_df %>% 
+        select(-starts_with("kurtosis_")) %>%
+        select(-starts_with("skewness_")) %>%
+        select(-starts_with("avg_")) %>%
+        select(-starts_with("min_")) %>%
+        select(-starts_with("max_")) %>%
+        select(-starts_with("var_")) %>%
+        select(-starts_with("stddev_")) %>%
+        select(-starts_with("amplitude_")) %>%
+        select(-one_of(c("X"
+                         ,"new_window"
+                         ,"cvtd_timestamp"
+                         ,"raw_timestamp_part_1"
+                         ,"num_window")))
+}
+
+set.seed(1972)
+
+base_df <- read.csv("./data/pml-training.csv")
+
+inTrain <- createDataPartition(base_df$classe, p=0.7, list=F)
+train_df <- base_df[inTrain,]
+validate_df <- base_df[-inTrain,]
+
+train_df <- wle_cleaner(train_df)
+
+```
+
+## Question
+
+In 2013, Velloso _et al_ presented a paper describing their approach to qualitatively recognizing activity through the use of sensors. Their Weight Lifting Exercises (WLE) dataset has been provided.
+
+I was presented the following questions:
+
+* Can a machine learning approach using the WLE dataset accurately identify when a user has correctly performed a weight lifting exercise?
+* If they did not, identify how their exercise was incorrect?
+
+## Input data 
+Velloso, _et al_ described the WLE dataset as follows:
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).  Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. ... " in: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+I was provided a training set and a testing set of data from the WLE dataset. 
+
+### Data Exploration
+
+The training dataset had 19622 observations with 160 variables.  The testing set had the same number of variables but only twentry observations. I chose to partition the training dataset with 70% for training and 30% for validation.
+
+Because of the large number of variables, I used a random forest approach.  Many of the variables had null or NA values.  Because the random forest methodology does not handle NA or null values, these variables were removed: variables beginning with "kurtosis_", "skewness_", "amplitude_", "avg_", "min_", "max_", "var_", or "stddev_". This removed 100 variables.
+
+## Features 
+
+I created a preliminary random forest with the _classe_ variable as the outcome and all other variables as predictors.  This was used in the varImpPlot function to obtain a starting point for feature selection.  Based the intial run, I removed the following variables: "X", "new_window", "cvtd_timestamp", "raw_timestamp_part_1", "raw_timestamp_part_2", and "num_window".  After removing these variables, I created a new random forest with the same parameters.  The output of the varImpPlot for this forest is shown below.
+
+```{r feature_graph}
+
+prelim.rf <- randomForest(classe ~ ., data=train_df)
+vip <- varImpPlot(prelim.rf)
+
+```
+Based on this, I incrementally added the following predictors until the OOB estimate of error rate appeared to bottom out.
+
+* roll_belt 
+* yaw_belt
+* magnet_dumbbell_z
+* pitch_forearm
+* magnet_dumbbell_y
+* pitch_belt
+
+## Algorithm 
+
+I used the randomForest package instead of the caret rf() function.  
+
+```{r rf}
+forest <- randomForest(classe ~ roll_belt + yaw_belt + magnet_dumbbell_z + pitch_forearm + magnet_dumbbell_y + pitch_belt + roll_forearm, data = train_df, mdim2nd=15, keep.forest=TRUE)
+print(forest)
+
+
+```
+
+## Parameters 
+
+I used the following parameters:
+
+* mdim2nd=15, which provides an automatic 2nd run using the k most important variables from the first run. 
+* keep.forest=TRUE, which means the forest will be retained after the run
+
+
+## Evaluation 
+I used the validation data partition for my evaluation.
+
+The caret _confusionMatrix_ function with the validation data frame as the test component produced the following results:
+
+```{r confusionMatrix}
+validate_df <- wle_cleaner(validate_df)
+val_pd <- predict(forest, validate_df)
+val_cm <- confusionMatrix(val_pd, validate_df$classe)
+print(val_cm)
+
+rm(forest)
+rm(prelim.rf)
+rm(val_cm)
+rm(val_pd)
+rm(train_df)
+rm(validate_df)
+
+```
